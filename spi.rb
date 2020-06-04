@@ -1,13 +1,34 @@
+require "byebug"
+
 class AST
 end
 
 class BinOp < AST
-  attr_reader :left, :op, :right
+  attr_reader :left, :op, :right, :token
   
   def initialize(left:, op:, right:)
     @left = left
     @op = op
+    @token = op
     @right = right
+  end
+end
+
+class RPNOp < AST
+  attr_reader :child, :op
+
+  def initialize(child:, op:)
+    @child = child
+    @op = op
+  end
+end
+
+class LISPOp
+  attr_reader :child, :op
+
+  def initialize(child:, op:)
+    @child = child
+    @op = op
   end
 end
 
@@ -34,7 +55,7 @@ end
 class Tokenizer
   def tokenize(text)
     tokens = []
-    text.scan(/[[:digit:]]+|[[:punct:]]/) do |match|
+    text.scan(/[[:digit:]]+|[[:punct:]]|[[:word:]]+/) do |match|
       case match
       when "+"
         tokens << Token.new(type: "plus", value: match)
@@ -48,8 +69,16 @@ class Tokenizer
         tokens << Token.new(type: "lPAREN", value: match)
       when ")"
         tokens << Token.new(type: "rPAREN", value: match)
+      when "rpn"
+        tokens << Token.new(type: "rpn", value: match)
+      when "lisp"
+        tokens << Token.new(type: "lisp", value: match)
       else
-        tokens << Token.new(type: "int", value: match.to_i)
+        if match.match(/[[:digit:]]+/)
+          tokens << Token.new(type: "int", value: match.to_i)
+        else
+          raise "Invalid token #{match}"
+        end
       end
     end
     tokens << Token.new(type: "eof", value: nil)
@@ -58,6 +87,10 @@ class Tokenizer
   end
 end
 
+# grammar rules (proposed solution):
+# expr: (term (( + | - |) term)*) | (RPN|LISP) expr
+# term: factor ((MULT|DIV)  factor)*
+# factor: int | pOPEN expr pCLOSE
 class Parser
 
   def initialize(tokens)
@@ -68,8 +101,9 @@ class Parser
     @tokens[0]
   end
 
-  def eat(token_type)
+  def eat(token_type = nil)
     token = @tokens.shift
+    return token if token_type.nil?
     return token if token.type == token_type
 
     raise "Invalid Syntax, expected #{token_type}"
@@ -105,17 +139,23 @@ class Parser
   end
 
   def expr
-    node = term
-    while ["plus", "minus"].include? lookahead.type
-      token = lookahead
-      if token.type == "plus"
-        eat "plus"
-      elsif token.type == "minus"
-        eat "minus"
+    if ["lisp", "rpn"].include? lookahead.type
+      token = eat
+      node = RPNOp.new(child: expr, op: token) if token.type == "rpn"
+      node = LISPOp.new(child: expr, op: token) if token.type == "lisp"
+    else
+      node = term
+      while ["plus", "minus"].include? lookahead.type
+        token = lookahead
+        if token.type == "plus"
+          eat "plus"
+        elsif token.type == "minus"
+          eat "minus"
+        end
+        node = BinOp.new(left: node, op: token, right: term)
       end
-      node = BinOp.new(left: node, op: token, right: term)
     end
-    
+
     node
   end
 
@@ -142,9 +182,43 @@ class Interpreter < NodeVisitor
     node.token.value
   end
 
+  def visit_RPNOp(node)
+    result = ''
+    expr = node.child
+    rpn(expr, result)
+
+    result
+  end
+
+  def visit_LISPOp(node)
+    expr = node.child
+
+    lisp(expr)
+  end
+
   def interpret(tree)
     visit(tree)
   end
+
+  def rpn(node, result)
+    return if node.nil?
+    return result << node.token.value.to_s + ' ' if node.class == Num
+
+    rpn(node.left, result)
+    rpn(node.right, result)
+    result << node.token.value.to_s + ' '
+  end
+
+  def lisp(node)
+    return if node.nil?
+    return node.token.value if node.class == Num
+
+    left = lisp(node.left)
+    right = lisp(node.right)
+    
+    "(#{node.op.value} #{right} #{left})"
+  end
+
 end
 
 loop do
