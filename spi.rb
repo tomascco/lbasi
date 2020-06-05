@@ -2,12 +2,22 @@ class AST
 end
 
 class BinOp < AST
-  attr_reader :left, :op, :right
+  attr_reader :left, :op, :right, :token
   
   def initialize(left:, op:, right:)
     @left = left
     @op = op
+    @token = @op
     @right = right
+  end
+end
+
+class UnaryOp
+  attr_reader :child, :op, :token
+  def initialize(child:, op:)
+    @child = child
+    @op = op
+    @token = @op
   end
 end
 
@@ -58,6 +68,10 @@ class Tokenizer
   end
 end
 
+# current grammar rules:
+# expr: term ((plus|minus|) term)*
+# term: factor ((MULT|DIV)  factor)*
+# factor: (plus|minus) factor | int | pOPEN expr pCLOSE
 class Parser
 
   def initialize(tokens)
@@ -68,8 +82,9 @@ class Parser
     @tokens[0]
   end
 
-  def eat(token_type)
+  def eat(token_type = nil)
     token = @tokens.shift
+    return token if token_type.nil?
     return token if token.type == token_type
 
     raise "Invalid Syntax, expected #{token_type}"
@@ -77,7 +92,10 @@ class Parser
 
   # Rules
   def factor
-    if lookahead.type != "lPAREN"
+    if ["plus", "minus"].include? lookahead.type
+      token = eat
+      node = UnaryOp.new(child: factor, op: token)
+    elsif lookahead.type != "lPAREN"
       node = Num.new(token: eat("int"))
     elsif lookahead.type == "lPAREN"
       eat "lPAREN"
@@ -140,6 +158,11 @@ class Interpreter < NodeVisitor
 
   def visit_Num(node)
     node.token.value
+  end
+
+  def visit_UnaryOp(node)
+    return +visit(node.child) if node.op.type == "plus"
+    return -visit(node.child) if node.op.type == "minus"
   end
 
   def interpret(tree)
