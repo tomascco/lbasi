@@ -9,26 +9,17 @@ class BinOp < AST
   def initialize(left:, op:, right:)
     @left = left
     @op = op
-    @token = op
+    @token = @op
     @right = right
   end
 end
 
-class RPNOp < AST
-  attr_reader :child, :op
-
+class UnaryOp
+  attr_reader :child, :op, :token
   def initialize(child:, op:)
     @child = child
     @op = op
-  end
-end
-
-class LISPOp
-  attr_reader :child, :op
-
-  def initialize(child:, op:)
-    @child = child
-    @op = op
+    @token = @op
   end
 end
 
@@ -87,10 +78,10 @@ class Tokenizer
   end
 end
 
-# grammar rules (proposed solution):
-# expr: (term (( + | - |) term)*) | (RPN|LISP) expr
+# current grammar rules:
+# expr: term ((plus|minus|) term)*
 # term: factor ((MULT|DIV)  factor)*
-# factor: int | pOPEN expr pCLOSE
+# factor: (plus|minus) factor | int | pOPEN expr pCLOSE
 class Parser
 
   def initialize(tokens)
@@ -111,7 +102,10 @@ class Parser
 
   # Rules
   def factor
-    if lookahead.type != "lPAREN"
+    if ["plus", "minus"].include? lookahead.type
+      token = eat
+      node = UnaryOp.new(child: factor, op: token)
+    elsif lookahead.type != "lPAREN"
       node = Num.new(token: eat("int"))
     elsif lookahead.type == "lPAREN"
       eat "lPAREN"
@@ -182,18 +176,9 @@ class Interpreter < NodeVisitor
     node.token.value
   end
 
-  def visit_RPNOp(node)
-    result = ''
-    expr = node.child
-    rpn(expr, result)
-
-    result
-  end
-
-  def visit_LISPOp(node)
-    expr = node.child
-
-    lisp(expr)
+  def visit_UnaryOp(node)
+    return +visit(node.child) if node.op.type == "plus"
+    return -visit(node.child) if node.op.type == "minus"
   end
 
   def interpret(tree)
